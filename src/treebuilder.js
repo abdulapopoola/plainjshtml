@@ -43,6 +43,8 @@ export class TreeBuilder {
         return this._handleAfterHead(token);
       case InsertionMode.IN_BODY:
         return this._handleInBody(token);
+      case InsertionMode.AFTER_BODY:
+        return this._handleAfterBody(token);
       default:
         return this._handleInBody(token);
     }
@@ -242,6 +244,17 @@ export class TreeBuilder {
       return;
     }
     if (token instanceof Tag && token.kind === Tag.START) {
+      if (token.name === "html") {
+        const html = this.open_elements[0];
+        if (html && html.attrs) {
+          for (const [key, value] of Object.entries(token.attrs || {})) {
+            if (html.attrs[key] == null) {
+              html.attrs[key] = value;
+            }
+          }
+        }
+        return;
+      }
       const node = this._insertElement(token.name, token.attrs);
       if (!token.self_closing && !VOID_ELEMENTS.has(token.name)) {
         this.open_elements.push(node);
@@ -249,9 +262,36 @@ export class TreeBuilder {
       return;
     }
     if (token instanceof Tag && token.kind === Tag.END) {
+      if (token.name === "body") {
+        this.mode = InsertionMode.AFTER_BODY;
+        return;
+      }
+      if (token.name === "html") {
+        this.mode = InsertionMode.AFTER_BODY;
+        return;
+      }
       this._popUntil(token.name);
       return;
     }
+  }
+
+  _handleAfterBody(token) {
+    if (token instanceof CharacterTokens && isAllWhitespace(token.data)) {
+      this._insertText(token.data);
+      return;
+    }
+    if (token instanceof CommentToken) {
+      this._currentNode().appendChild(new SimpleDomNode("#comment", null, token.data));
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.START && token.name === "html") {
+      return this._handleInBody(token);
+    }
+    if (token instanceof EOFToken) {
+      return;
+    }
+    this.mode = InsertionMode.IN_BODY;
+    return this._handleInBody(token);
   }
 
   _currentNode() {
