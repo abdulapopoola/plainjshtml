@@ -86,6 +86,7 @@ export function generateErrorMessage(code, tagName = null) {
     "unexpected-token-in-frameset": "Unexpected content in <frameset>",
     "unexpected-token-after-frameset": "Unexpected content after <frameset>",
     "unexpected-token-after-after-frameset": "Unexpected content after frameset closed",
+    "eof-in-frameset": "Unexpected end of file in frameset",
     "unexpected-token-after-body": "Unexpected content after </body>",
     "unexpected-char-after-body": "Unexpected character after </body>",
     "unexpected-characters-in-column-group": "Text not allowed in <colgroup>",

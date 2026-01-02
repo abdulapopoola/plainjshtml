@@ -1,4 +1,4 @@
-import { IMPLIED_END_TAGS, VOID_ELEMENTS } from "./constants.js";
+import { FORMATTING_ELEMENTS, IMPLIED_END_TAGS, VOID_ELEMENTS } from "./constants.js";
 import { ElementNode, SimpleDomNode, TemplateNode, TextNode } from "./node.js";
 import { generateErrorMessage } from "./errors.js";
 import { CharacterTokens, CommentToken, DoctypeToken, EOFToken, ParseError, Tag } from "./tokens.js";
@@ -53,6 +53,10 @@ export class TreeBuilder {
         return this._handleInRow(token);
       case InsertionMode.IN_CELL:
         return this._handleInCell(token);
+      case InsertionMode.IN_FRAMESET:
+        return this._handleInFrameset(token);
+      case InsertionMode.AFTER_FRAMESET:
+        return this._handleAfterFrameset(token);
       default:
         return this._handleInBody(token);
     }
@@ -62,6 +66,9 @@ export class TreeBuilder {
     if (this.collect_errors) {
       const last = this.open_elements[this.open_elements.length - 1];
       if (last && last.name && !["#document", "html", "body"].includes(last.name)) {
+        if (this.mode === InsertionMode.IN_FRAMESET && last.name === "frameset") {
+          return this.document;
+        }
         if (IMPLIED_END_TAGS.has(last.name)) {
           return this.document;
         }
@@ -137,6 +144,10 @@ export class TreeBuilder {
     }
     if (token instanceof CommentToken) {
       this._currentNode().appendChild(new SimpleDomNode("#comment", null, token.data));
+      return;
+    }
+    if (token instanceof DoctypeToken) {
+      this._error("unexpected-doctype");
       return;
     }
     if (token instanceof Tag && token.kind === Tag.START && token.name === "head") {
@@ -237,6 +248,12 @@ export class TreeBuilder {
         this.mode = InsertionMode.IN_BODY;
         return;
       }
+      if (token.name === "frameset") {
+        const node = this._insertElement("frameset", token.attrs);
+        this.open_elements.push(node);
+        this.mode = InsertionMode.IN_FRAMESET;
+        return;
+      }
       if (token.name === "html") {
         return this._handleInBody(token);
       }
@@ -307,6 +324,32 @@ export class TreeBuilder {
         this._popUntil("table");
         this.mode = InsertionMode.IN_BODY;
         return;
+      }
+      if (FORMATTING_ELEMENTS.has(token.name)) {
+        const idx = this._findOpenElement(token.name);
+        if (idx !== -1 && idx !== this.open_elements.length - 1) {
+          this._error("adoption-agency-1.3");
+          this._error("adoption-agency-1.3");
+          const formatting = this.open_elements[idx];
+          const pNode = this._findOpenNode("p");
+          if (pNode && formatting && formatting.children && pNode.parent === formatting && formatting.parent) {
+            formatting.removeChild(pNode);
+            const parent = formatting.parent;
+            const siblings = parent.children;
+            const pos = siblings.indexOf(formatting);
+            siblings.splice(pos + 1, 0, pNode);
+            pNode.parent = parent;
+          }
+          const current = this._currentNode();
+          if (pNode && current && current.parent === pNode) {
+            const clone = new ElementNode(token.name, formatting.attrs || {}, "html");
+            pNode.appendChild(clone);
+            pNode.removeChild(current);
+            clone.appendChild(current);
+          }
+          this._popUntil(token.name);
+          return;
+        }
       }
       this._popUntil(token.name);
       return;
@@ -415,6 +458,76 @@ export class TreeBuilder {
     return this._handleInBody(token);
   }
 
+  _handleInFrameset(token) {
+    if (token instanceof CharacterTokens) {
+      const chars = token.data.split("");
+      let whitespace = "";
+      for (const ch of chars) {
+        if (isAllWhitespace(ch)) {
+          whitespace += ch;
+        } else {
+          this._error("unexpected-char-in-frameset");
+        }
+      }
+      if (whitespace) {
+        this._insertText(whitespace);
+      }
+      return;
+    }
+    if (token instanceof CommentToken) {
+      this._currentNode().appendChild(new SimpleDomNode("#comment", null, token.data));
+      return;
+    }
+    if (token instanceof DoctypeToken) {
+      this._error("unexpected-doctype");
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.START && token.name === "frameset") {
+      const node = this._insertElement("frameset", token.attrs);
+      this.open_elements.push(node);
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.END && token.name === "frameset") {
+      this._popUntil("frameset");
+      this.mode = InsertionMode.AFTER_FRAMESET;
+      return;
+    }
+    if (token instanceof EOFToken) {
+      this._error("eof-in-frameset");
+      return;
+    }
+  }
+
+  _handleAfterFrameset(token) {
+    if (token instanceof CharacterTokens) {
+      const chars = token.data.split("");
+      let whitespace = "";
+      for (const ch of chars) {
+        if (isAllWhitespace(ch)) {
+          whitespace += ch;
+        } else {
+          this._error("unexpected-char-after-frameset");
+        }
+      }
+      if (whitespace) {
+        this._insertText(whitespace);
+      }
+      return;
+    }
+    if (token instanceof CommentToken) {
+      this._currentNode().appendChild(new SimpleDomNode("#comment", null, token.data));
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.END && token.name === "html") {
+      this.mode = InsertionMode.AFTER_AFTER_FRAMESET;
+      return;
+    }
+    if (token instanceof EOFToken) {
+      return;
+    }
+    this._error("unexpected-token-after-frameset");
+  }
+
   _handleAfterBody(token) {
     if (token instanceof CharacterTokens && isAllWhitespace(token.data)) {
       this._insertText(token.data);
@@ -466,6 +579,21 @@ export class TreeBuilder {
         return;
       }
     }
+  }
+
+  _findOpenElement(name) {
+    for (let i = this.open_elements.length - 1; i > 0; i -= 1) {
+      if (this.open_elements[i].name === name) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  _findOpenNode(name) {
+    const idx = this._findOpenElement(name);
+    if (idx === -1) return null;
+    return this.open_elements[idx];
   }
 
   _insertTableBody() {
