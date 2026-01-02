@@ -452,6 +452,10 @@ export class TreeBuilder {
           return;
         }
       }
+      if (this._findOpenElement(token.name) === -1) {
+        this._error("unexpected-end-tag", token.name);
+        return;
+      }
       this._popUntil(token.name);
       return;
     }
