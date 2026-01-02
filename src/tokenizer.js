@@ -523,6 +523,7 @@ export class Tokenizer {
             continue;
           }
           if (ch === ">") {
+            this._error("expected-doctype-name-but-got-right-bracket", pos);
             this._error("missing-doctype-name", pos);
             this.sink.process(new DoctypeToken(new Doctype(null, null, null, true)));
             state = Tokenizer.DATA;
@@ -538,6 +539,7 @@ export class Tokenizer {
             continue;
           }
           if (ch === ">") {
+            this._error("expected-doctype-name-but-got-right-bracket", pos);
             this._error("missing-doctype-name", pos);
             this.sink.process(new DoctypeToken(new Doctype(null, null, null, true)));
             state = Tokenizer.DATA;

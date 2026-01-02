@@ -100,6 +100,7 @@ export function generateErrorMessage(code, tagName = null) {
     "unexpected-end-tag-in-foreign-content": `Mismatched </${tagName}> end tag in SVG/MathML content`,
     "unexpected-end-tag-in-fragment-context": `</${tagName}> end tag not allowed in fragment parsing context`,
     "end-tag-too-early": `</${tagName}> end tag closed early (unclosed children)`,
+    "end-tag-too-early-ignored": `</${tagName}> end tag ignored (unclosed children)`,
     "adoption-agency-1.3": "Misnested tags require adoption agency algorithm",
     "non-void-html-element-start-tag-with-trailing-solidus": `<${tagName}/> self-closing syntax on non-void element`,
     "image-start-tag": `Deprecated <${tagName}> tag (use <img> instead)`,

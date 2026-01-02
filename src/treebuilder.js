@@ -85,6 +85,20 @@ export class TreeBuilder {
         this._error("expected-closing-tag-but-got-eof", last.name);
       }
     }
+    if (this.document.name === "#document") {
+      const html = this.document.children?.find((child) => child.name === "html");
+      let htmlNode = html;
+      if (!htmlNode) {
+        htmlNode = new ElementNode("html", {}, "html");
+        this.document.appendChild(htmlNode);
+      }
+      if (!htmlNode.children?.some((child) => child.name === "head")) {
+        htmlNode.appendChild(new ElementNode("head", {}, "html"));
+      }
+      if (!htmlNode.children?.some((child) => child.name === "body")) {
+        htmlNode.appendChild(new ElementNode("body", {}, "html"));
+      }
+    }
     return this.document;
   }
 
@@ -352,6 +366,10 @@ export class TreeBuilder {
       if (token.name === "p") {
         this._closeIfOpen("p");
       }
+      if (token.name === "head") {
+        this._error("unexpected-start-tag", token.name);
+        return;
+      }
       if (token.name === "frame") {
         this._error("unexpected-start-tag-ignored", token.name);
         return;
@@ -379,6 +397,13 @@ export class TreeBuilder {
       if (token.name === "html") {
         this.mode = InsertionMode.AFTER_BODY;
         return;
+      }
+      if (token.name === "form") {
+        const idx = this._findOpenElement("form");
+        if (idx !== -1 && this._currentNode().name !== "form") {
+          this._error("end-tag-too-early-ignored", token.name);
+          return;
+        }
       }
       if (["style", "script", "title", "head"].includes(token.name)) {
         this._error("unexpected-end-tag", token.name);
