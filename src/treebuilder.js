@@ -259,6 +259,13 @@ export class TreeBuilder {
         return;
       }
       this._popUntil(token.name);
+      if (this.original_mode === InsertionMode.IN_TABLE) {
+        this.mode = InsertionMode.IN_TABLE;
+        this.original_mode = null;
+      } else if (this.original_mode === InsertionMode.AFTER_HEAD) {
+        this.mode = InsertionMode.AFTER_HEAD;
+        this.original_mode = null;
+      }
       return;
     }
     if (token instanceof Tag && token.kind === Tag.END && token.name === "head") {
@@ -303,6 +310,11 @@ export class TreeBuilder {
         if (this.head_element) {
           const node = new ElementNode(token.name, token.attrs, "html");
           this.head_element.appendChild(node);
+          if (["title", "style", "script"].includes(token.name)) {
+            this.open_elements.push(node);
+            this.original_mode = InsertionMode.AFTER_HEAD;
+            this.mode = InsertionMode.IN_HEAD;
+          }
         }
         return;
       }
@@ -405,7 +417,7 @@ export class TreeBuilder {
           return;
         }
       }
-      if (["style", "script", "title", "head"].includes(token.name)) {
+      if (["style", "script", "head"].includes(token.name)) {
         this._error("unexpected-end-tag", token.name);
         return;
       }
@@ -474,6 +486,13 @@ export class TreeBuilder {
         this.mode = InsertionMode.IN_CELL;
         return;
       }
+      this._error("unexpected-start-tag-implies-table-voodoo", token.name);
+      const node = new ElementNode(token.name, token.attrs, "html");
+      this._insertFosterParent(node);
+      this.open_elements.push(node);
+      this.original_mode = InsertionMode.IN_TABLE;
+      this.mode = InsertionMode.IN_BODY;
+      return;
     }
     if (token instanceof Tag && token.kind === Tag.END && token.name === "table") {
       this._popUntil("table");
@@ -697,6 +716,24 @@ export class TreeBuilder {
     const tbody = this._insertElement("tbody", {});
     this.open_elements.push(tbody);
     this.mode = InsertionMode.IN_TABLE_BODY;
+  }
+
+  _insertFosterParent(node) {
+    const tableIndex = this._findOpenElement("table");
+    if (tableIndex === -1) {
+      this.document.appendChild(node);
+      return;
+    }
+    const table = this.open_elements[tableIndex];
+    const parent = table.parent || this.document;
+    const siblings = parent.children || [];
+    const index = siblings.indexOf(table);
+    if (index === -1) {
+      parent.appendChild(node);
+      return;
+    }
+    siblings.splice(index, 0, node);
+    node.parent = parent;
   }
 
   _error(code, tagName = null) {
