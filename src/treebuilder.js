@@ -45,6 +45,14 @@ export class TreeBuilder {
         return this._handleInBody(token);
       case InsertionMode.AFTER_BODY:
         return this._handleAfterBody(token);
+      case InsertionMode.IN_TABLE:
+        return this._handleInTable(token);
+      case InsertionMode.IN_TABLE_BODY:
+        return this._handleInTableBody(token);
+      case InsertionMode.IN_ROW:
+        return this._handleInRow(token);
+      case InsertionMode.IN_CELL:
+        return this._handleInCell(token);
       default:
         return this._handleInBody(token);
     }
@@ -261,6 +269,12 @@ export class TreeBuilder {
       if (token.name === "p") {
         this._closeIfOpen("p");
       }
+      if (token.name === "table") {
+        const node = this._insertElement("table", token.attrs);
+        this.open_elements.push(node);
+        this.mode = InsertionMode.IN_TABLE;
+        return;
+      }
       const node = this._insertElement(token.name, token.attrs);
       if (!token.self_closing && !VOID_ELEMENTS.has(token.name)) {
         this.open_elements.push(node);
@@ -276,9 +290,115 @@ export class TreeBuilder {
         this.mode = InsertionMode.AFTER_BODY;
         return;
       }
+      if (token.name === "table") {
+        this._popUntil("table");
+        this.mode = InsertionMode.IN_BODY;
+        return;
+      }
       this._popUntil(token.name);
       return;
     }
+  }
+
+  _handleInTable(token) {
+    if (token instanceof CharacterTokens) {
+      this._insertText(token.data);
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.START) {
+      if (["tbody", "thead", "tfoot"].includes(token.name)) {
+        const node = this._insertElement(token.name, token.attrs);
+        this.open_elements.push(node);
+        this.mode = InsertionMode.IN_TABLE_BODY;
+        return;
+      }
+      if (token.name === "tr") {
+        this._insertTableBody();
+        const node = this._insertElement("tr", token.attrs);
+        this.open_elements.push(node);
+        this.mode = InsertionMode.IN_ROW;
+        return;
+      }
+      if (token.name === "td" || token.name === "th") {
+        this._insertTableBody();
+        const row = this._insertElement("tr", {});
+        this.open_elements.push(row);
+        const cell = this._insertElement(token.name, token.attrs);
+        this.open_elements.push(cell);
+        this.mode = InsertionMode.IN_CELL;
+        return;
+      }
+    }
+    if (token instanceof Tag && token.kind === Tag.END && token.name === "table") {
+      this._popUntil("table");
+      this.mode = InsertionMode.IN_BODY;
+      return;
+    }
+    return this._handleInBody(token);
+  }
+
+  _handleInTableBody(token) {
+    if (token instanceof Tag && token.kind === Tag.START) {
+      if (token.name === "tr") {
+        const node = this._insertElement("tr", token.attrs);
+        this.open_elements.push(node);
+        this.mode = InsertionMode.IN_ROW;
+        return;
+      }
+      if (token.name === "td" || token.name === "th") {
+        const row = this._insertElement("tr", {});
+        this.open_elements.push(row);
+        const cell = this._insertElement(token.name, token.attrs);
+        this.open_elements.push(cell);
+        this.mode = InsertionMode.IN_CELL;
+        return;
+      }
+    }
+    if (token instanceof Tag && token.kind === Tag.END && ["tbody", "thead", "tfoot"].includes(token.name)) {
+      this._popUntil(token.name);
+      this.mode = InsertionMode.IN_TABLE;
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.END && token.name === "table") {
+      this._popUntil("table");
+      this.mode = InsertionMode.IN_BODY;
+      return;
+    }
+    return this._handleInTable(token);
+  }
+
+  _handleInRow(token) {
+    if (token instanceof Tag && token.kind === Tag.START && (token.name === "td" || token.name === "th")) {
+      const cell = this._insertElement(token.name, token.attrs);
+      this.open_elements.push(cell);
+      this.mode = InsertionMode.IN_CELL;
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.END && token.name === "tr") {
+      this._popUntil("tr");
+      this.mode = InsertionMode.IN_TABLE_BODY;
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.END && token.name === "table") {
+      this._popUntil("table");
+      this.mode = InsertionMode.IN_BODY;
+      return;
+    }
+    return this._handleInTable(token);
+  }
+
+  _handleInCell(token) {
+    if (token instanceof Tag && token.kind === Tag.END && (token.name === "td" || token.name === "th")) {
+      this._popUntil(token.name);
+      this.mode = InsertionMode.IN_ROW;
+      return;
+    }
+    if (token instanceof Tag && token.kind === Tag.START && (token.name === "td" || token.name === "th")) {
+      this._popUntil("td");
+      this.mode = InsertionMode.IN_ROW;
+      return this._handleInRow(token);
+    }
+    return this._handleInBody(token);
   }
 
   _handleAfterBody(token) {
@@ -332,6 +452,12 @@ export class TreeBuilder {
         return;
       }
     }
+  }
+
+  _insertTableBody() {
+    const tbody = this._insertElement("tbody", {});
+    this.open_elements.push(tbody);
+    this.mode = InsertionMode.IN_TABLE_BODY;
   }
 
   _error(code) {
