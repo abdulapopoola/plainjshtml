@@ -403,12 +403,6 @@ export class TreeBuilder {
       this.mode = InsertionMode.IN_ROW;
       return;
     }
-    if (token instanceof Tag && token.kind === Tag.END && token.name === "table") {
-      this._error("unexpected-cell-end-tag", token.name);
-      this._popUntil("table");
-      this.mode = InsertionMode.IN_BODY;
-      return;
-    }
     if (token instanceof Tag && token.kind === Tag.START && (token.name === "td" || token.name === "th")) {
       this._popUntil("td");
       this.mode = InsertionMode.IN_ROW;
