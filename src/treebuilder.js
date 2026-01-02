@@ -278,6 +278,10 @@ export class TreeBuilder {
       if (token.name === "p") {
         this._closeIfOpen("p");
       }
+      if (token.name === "frame") {
+        this._error("unexpected-start-tag-ignored", token.name);
+        return;
+      }
       if (token.name === "table") {
         const node = this._insertElement("table", token.attrs);
         this.open_elements.push(node);
