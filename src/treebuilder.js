@@ -190,8 +190,27 @@ export class TreeBuilder {
   }
 
   _handleInHead(token) {
-    if (token instanceof CharacterTokens && isAllWhitespace(token.data)) {
-      this._insertText(token.data);
+    if (token instanceof CharacterTokens) {
+      const current = this._currentNode();
+      if (current && ["style", "script", "title"].includes(current.name)) {
+        this._insertText(token.data);
+        return;
+      }
+      if (isAllWhitespace(token.data)) {
+        this._insertText(token.data);
+        return;
+      }
+      const match = token.data.match(/^[\t\n\f\r ]+/);
+      const leading = match ? match[0] : "";
+      const rest = leading ? token.data.slice(leading.length) : token.data;
+      if (leading) {
+        this._insertText(leading);
+      }
+      this.open_elements.pop();
+      this.mode = InsertionMode.AFTER_HEAD;
+      if (rest) {
+        return this._handleAfterHead(new CharacterTokens(rest));
+      }
       return;
     }
     if (token instanceof CommentToken) {
@@ -210,7 +229,6 @@ export class TreeBuilder {
       if (token.name === "title" || token.name === "style" || token.name === "script") {
         const node = this._insertElement(token.name, token.attrs);
         this.open_elements.push(node);
-        this.open_elements.pop();
         return;
       }
       if (token.name === "head") {
@@ -220,6 +238,14 @@ export class TreeBuilder {
       if (token.name === "html") {
         return this._handleInBody(token);
       }
+    }
+    if (token instanceof Tag && token.kind === Tag.END && ["style", "script", "title"].includes(token.name)) {
+      if (this._currentNode().name !== token.name) {
+        this._error("unexpected-end-tag", token.name);
+        return;
+      }
+      this._popUntil(token.name);
+      return;
     }
     if (token instanceof Tag && token.kind === Tag.END && token.name === "head") {
       this.open_elements.pop();
@@ -278,6 +304,7 @@ export class TreeBuilder {
     }
     if (token instanceof Tag && token.kind === Tag.END) {
       if (["base", "basefont", "bgsound", "link", "meta", "title", "style", "script", "head"].includes(token.name)) {
+        this._error("unexpected-end-tag", token.name);
         return;
       }
     }
@@ -351,6 +378,10 @@ export class TreeBuilder {
       }
       if (token.name === "html") {
         this.mode = InsertionMode.AFTER_BODY;
+        return;
+      }
+      if (["style", "script", "title", "head"].includes(token.name)) {
+        this._error("unexpected-end-tag", token.name);
         return;
       }
       if (token.name === "table") {
@@ -592,8 +623,16 @@ export class TreeBuilder {
 
   _insertText(text) {
     if (!text) return;
+    const parent = this._currentNode();
+    if (parent.children && parent.children.length) {
+      const last = parent.children[parent.children.length - 1];
+      if (last && last.name === "#text") {
+        last.data = (last.data || "") + text;
+        return;
+      }
+    }
     const node = new TextNode(text);
-    this._currentNode().appendChild(node);
+    parent.appendChild(node);
   }
 
   _popUntil(name) {

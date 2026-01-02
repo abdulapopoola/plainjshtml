@@ -70,6 +70,8 @@ export class Tokenizer {
     let currentComment = "";
     let currentDoctype = null;
 
+    let overrideState = null;
+
     const flushText = (decodeEntities) => {
       if (!buffer) return;
       const output = decodeEntities
@@ -87,12 +89,12 @@ export class Tokenizer {
       if (emitted.kind === Tag.START) {
         if (emitted.name === "textarea" || emitted.name === "title") {
           this.rawtext_tag_name = emitted.name;
-          state = Tokenizer.RCDATA;
+          overrideState = Tokenizer.RCDATA;
         } else if (
           ["script", "style", "xmp", "iframe", "noembed", "noframes", "plaintext"].includes(emitted.name)
         ) {
           this.rawtext_tag_name = emitted.name;
-          state = Tokenizer.RAWTEXT;
+          overrideState = Tokenizer.RAWTEXT;
         }
       }
     };
@@ -210,9 +212,8 @@ export class Tokenizer {
           }
           if (ch === ">") {
             emitTag();
-            if (state === Tokenizer.TAG_NAME) {
-              state = Tokenizer.DATA;
-            }
+            state = overrideState ?? Tokenizer.DATA;
+            overrideState = null;
             pos += 1;
             continue;
           }
@@ -392,7 +393,8 @@ export class Tokenizer {
               currentTag.self_closing = true;
             }
             emitTag();
-            state = Tokenizer.DATA;
+            state = overrideState ?? Tokenizer.DATA;
+            overrideState = null;
             pos += 1;
             continue;
           }
