@@ -2,7 +2,7 @@ import { VOID_ELEMENTS } from "./constants.js";
 import { ElementNode, SimpleDomNode, TemplateNode, TextNode } from "./node.js";
 import { generateErrorMessage } from "./errors.js";
 import { CharacterTokens, CommentToken, DoctypeToken, EOFToken, ParseError, Tag } from "./tokens.js";
-import { InsertionMode, isAllWhitespace } from "./treebuilder_utils.js";
+import { InsertionMode, doctypeErrorAndQuirks, isAllWhitespace } from "./treebuilder_utils.js";
 
 export class TreeBuilder {
   constructor({ fragmentContext = null, iframeSrcdoc = false, collectErrors = false } = {}) {
@@ -57,6 +57,11 @@ export class TreeBuilder {
     if (token instanceof DoctypeToken) {
       const node = new SimpleDomNode("!doctype", null, token.doctype);
       this.document.appendChild(node);
+      const [parseError, quirksMode] = doctypeErrorAndQuirks(token.doctype, { iframeSrcdoc: this.iframe_srcdoc });
+      this.quirks_mode = quirksMode;
+      if (parseError) {
+        this._error("unknown-doctype");
+      }
       this.mode = InsertionMode.BEFORE_HTML;
       return;
     }
