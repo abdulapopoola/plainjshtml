@@ -105,11 +105,21 @@ export class Tokenizer {
             pos += 1;
             continue;
           }
-          if (state === Tokenizer.PLAINTEXT) {
-            buffer += ch;
+          buffer += ch;
+          pos += 1;
+          continue;
+        case Tokenizer.RCDATA:
+          if (ch === "<") {
+            flushText();
+            state = Tokenizer.TAG_OPEN;
             pos += 1;
             continue;
           }
+          buffer += ch;
+          pos += 1;
+          continue;
+        case Tokenizer.RAWTEXT:
+        case Tokenizer.PLAINTEXT:
           buffer += ch;
           pos += 1;
           continue;
