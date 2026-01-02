@@ -36,8 +36,8 @@ class StreamSink {
 
 export function* stream(input, { encoding = null } = {}) {
   let html = "";
-  if (input instanceof Uint8Array || input instanceof ArrayBuffer) {
-    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  if (input instanceof Uint8Array || input instanceof ArrayBuffer || ArrayBuffer.isView(input)) {
+    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input.buffer ?? input);
     const [decoded] = decodeHtml(bytes, encoding);
     html = decoded;
   } else {
