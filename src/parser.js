@@ -38,8 +38,8 @@ export class JustHTML {
     this.encoding = null;
 
     let htmlStr = "";
-    if (html instanceof Uint8Array || html instanceof ArrayBuffer) {
-      const bytes = html instanceof Uint8Array ? html : new Uint8Array(html);
+    if (html instanceof Uint8Array || html instanceof ArrayBuffer || ArrayBuffer.isView(html)) {
+      const bytes = html instanceof Uint8Array ? html : new Uint8Array(html.buffer ?? html);
       const [decoded, chosen] = decodeHtml(bytes, encoding);
       htmlStr = decoded;
       this.encoding = chosen;
@@ -54,6 +54,17 @@ export class JustHTML {
       collectErrors: shouldCollect,
     });
     const opts = tokenizerOpts || new TokenizerOpts();
+
+    if (fragmentContext && !fragmentContext.namespace) {
+      const rawtextElements = new Set(["textarea", "title", "style"]);
+      const tagName = fragmentContext.tag_name.toLowerCase();
+      if (rawtextElements.has(tagName)) {
+        opts.initial_state = Tokenizer.RAWTEXT;
+        opts.initial_rawtext_tag = tagName;
+      } else if (tagName === "plaintext" || tagName === "script") {
+        opts.initial_state = Tokenizer.PLAINTEXT;
+      }
+    }
 
     this.tokenizer = new Tokenizer(this.tree_builder, opts, {
       collectErrors: shouldCollect,
