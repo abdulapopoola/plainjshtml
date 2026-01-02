@@ -53,6 +53,7 @@ export class Tokenizer {
     this.errors = [];
     this._newline_positions = [];
     this._source_html = null;
+    this.rawtext_tag_name = null;
   }
 
   run(html) {
@@ -69,17 +70,31 @@ export class Tokenizer {
     let currentComment = "";
     let currentDoctype = null;
 
-    const flushText = () => {
+    const flushText = (decodeEntities) => {
       if (!buffer) return;
-      const decoded = decodeEntitiesInText(buffer, { reportError: (code) => this._error(code, pos) });
-      this.sink.process(new CharacterTokens(decoded));
+      const output = decodeEntities
+        ? decodeEntitiesInText(buffer, { reportError: (code) => this._error(code, pos) })
+        : buffer;
+      this.sink.process(new CharacterTokens(output));
       buffer = "";
     };
 
     const emitTag = () => {
       if (!currentTag) return;
-      this.sink.process(currentTag);
+      const emitted = currentTag;
+      this.sink.process(emitted);
       currentTag = null;
+      if (emitted.kind === Tag.START) {
+        if (emitted.name === "textarea" || emitted.name === "title") {
+          this.rawtext_tag_name = emitted.name;
+          state = Tokenizer.RCDATA;
+        } else if (
+          ["script", "style", "xmp", "iframe", "noembed", "noframes", "plaintext"].includes(emitted.name)
+        ) {
+          this.rawtext_tag_name = emitted.name;
+          state = Tokenizer.RAWTEXT;
+        }
+      }
     };
 
     const commitAttr = () => {
@@ -100,7 +115,7 @@ export class Tokenizer {
       switch (state) {
         case Tokenizer.DATA:
           if (ch === "<") {
-            flushText();
+            flushText(true);
             state = Tokenizer.TAG_OPEN;
             pos += 1;
             continue;
@@ -110,15 +125,27 @@ export class Tokenizer {
           continue;
         case Tokenizer.RCDATA:
           if (ch === "<") {
-            flushText();
-            state = Tokenizer.TAG_OPEN;
-            pos += 1;
-            continue;
+            if (this._maybeRawtextEndTag(html, pos)) {
+              flushText(true);
+              pos = this._consumeRawtextEndTag(html, pos);
+              state = Tokenizer.DATA;
+              this.rawtext_tag_name = null;
+              continue;
+            }
           }
           buffer += ch;
           pos += 1;
           continue;
         case Tokenizer.RAWTEXT:
+          if (ch === "<") {
+            if (this._maybeRawtextEndTag(html, pos)) {
+              flushText(false);
+              pos = this._consumeRawtextEndTag(html, pos);
+              state = Tokenizer.DATA;
+              this.rawtext_tag_name = null;
+              continue;
+            }
+          }
         case Tokenizer.PLAINTEXT:
           buffer += ch;
           pos += 1;
@@ -183,7 +210,9 @@ export class Tokenizer {
           }
           if (ch === ">") {
             emitTag();
-            state = Tokenizer.DATA;
+            if (state === Tokenizer.TAG_NAME) {
+              state = Tokenizer.DATA;
+            }
             pos += 1;
             continue;
           }
@@ -556,8 +585,11 @@ export class Tokenizer {
     }
 
     if (buffer) {
-      const decoded = decodeEntitiesInText(buffer, { reportError: (code) => this._error(code, pos) });
-      this.sink.process(new CharacterTokens(decoded));
+      const shouldDecode = state !== Tokenizer.RAWTEXT && state !== Tokenizer.PLAINTEXT;
+      const output = shouldDecode
+        ? decodeEntitiesInText(buffer, { reportError: (code) => this._error(code, pos) })
+        : buffer;
+      this.sink.process(new CharacterTokens(output));
     }
 
     this.sink.process(new EOFToken());
@@ -595,6 +627,26 @@ export class Tokenizer {
     const [line, column] = this._posToLineCol(pos);
     const message = generateErrorMessage(code);
     this.errors.push(new ParseError(code, line, column, message, this._source_html));
+  }
+
+  _maybeRawtextEndTag(html, pos) {
+    if (!this.rawtext_tag_name) return false;
+    if (html[pos] !== "<" || html[pos + 1] !== "/") return false;
+    const name = this.rawtext_tag_name;
+    const slice = html.slice(pos + 2, pos + 2 + name.length);
+    if (slice.toLowerCase() !== name) return false;
+    const after = html[pos + 2 + name.length];
+    return after === ">" || WHITESPACE.has(after ?? "");
+  }
+
+  _consumeRawtextEndTag(html, pos) {
+    const name = this.rawtext_tag_name;
+    const end = html.indexOf(">", pos + 2 + name.length);
+    if (end === -1) {
+      return html.length;
+    }
+    this.sink.process(new Tag(Tag.END, name, null, false));
+    return end + 1;
   }
 }
 

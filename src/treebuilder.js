@@ -23,10 +23,19 @@ export class TreeBuilder {
     this.ignore_lf = false;
 
     if (fragmentContext) {
-      const html = new ElementNode("html", {}, "html");
-      this.document.appendChild(html);
-      this.open_elements.push(html);
-      this.mode = InsertionMode.IN_BODY;
+      const tagName = fragmentContext.tag_name?.toLowerCase?.() ?? fragmentContext.tag_name;
+      if (tagName === "html") {
+        const head = new ElementNode("head", {}, "html");
+        const body = new ElementNode("body", {}, "html");
+        this.document.appendChild(head);
+        this.document.appendChild(body);
+        this.head_element = head;
+        this.open_elements.push(this.document, body);
+        this.mode = InsertionMode.IN_BODY;
+      } else {
+        this.open_elements.push(this.document);
+        this.mode = InsertionMode.IN_BODY;
+      }
     }
   }
 
@@ -66,7 +75,7 @@ export class TreeBuilder {
   finish() {
     if (this.collect_errors) {
       const last = this.open_elements[this.open_elements.length - 1];
-      if (last && last.name && !["#document", "html", "body"].includes(last.name)) {
+      if (last && last.name && !["#document", "#document-fragment", "html", "body"].includes(last.name)) {
         if (this.mode === InsertionMode.IN_FRAMESET && last.name === "frameset") {
           return this.document;
         }
