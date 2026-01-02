@@ -20,6 +20,7 @@ export class TreeBuilder {
     this.form_element = null;
     this.frameset_ok = true;
     this.quirks_mode = "no-quirks";
+    this.ignore_lf = false;
 
     if (fragmentContext) {
       const html = new ElementNode("html", {}, "html");
@@ -266,6 +267,11 @@ export class TreeBuilder {
         return this._handleInBody(token);
       }
     }
+    if (token instanceof Tag && token.kind === Tag.END) {
+      if (["base", "basefont", "bgsound", "link", "meta", "title", "style", "script", "head"].includes(token.name)) {
+        return;
+      }
+    }
     if (token instanceof EOFToken) {
       const node = this._insertElement("body", {});
       this.open_elements.push(node);
@@ -281,7 +287,14 @@ export class TreeBuilder {
 
   _handleInBody(token) {
     if (token instanceof CharacterTokens) {
-      this._insertText(token.data);
+      let data = token.data;
+      if (this.ignore_lf) {
+        if (data.startsWith("\n")) {
+          data = data.slice(1);
+        }
+        this.ignore_lf = false;
+      }
+      this._insertText(data);
       return;
     }
     if (token instanceof CommentToken) {
@@ -306,6 +319,9 @@ export class TreeBuilder {
       if (token.name === "frame") {
         this._error("unexpected-start-tag-ignored", token.name);
         return;
+      }
+      if (token.name === "pre") {
+        this.ignore_lf = true;
       }
       if (token.name === "table") {
         const node = this._insertElement("table", token.attrs);
