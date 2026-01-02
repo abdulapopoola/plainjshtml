@@ -81,6 +81,7 @@ export function generateErrorMessage(code, tagName = null) {
     "unexpected-cell-in-table-body": "Unexpected table cell outside of table row",
     "unexpected-form-in-table": "Form element not allowed in table context",
     "unexpected-hidden-input-in-table": "Hidden input in table triggers foster parenting",
+    "unexpected-cell-end-tag": "Unexpected cell end tag",
     "unexpected-hidden-input-after-head": "Unexpected hidden input after <head>",
     "unexpected-token-in-frameset": "Unexpected content in <frameset>",
     "unexpected-token-after-frameset": "Unexpected content after <frameset>",

@@ -1,4 +1,4 @@
-import { VOID_ELEMENTS } from "./constants.js";
+import { IMPLIED_END_TAGS, VOID_ELEMENTS } from "./constants.js";
 import { ElementNode, SimpleDomNode, TemplateNode, TextNode } from "./node.js";
 import { generateErrorMessage } from "./errors.js";
 import { CharacterTokens, CommentToken, DoctypeToken, EOFToken, ParseError, Tag } from "./tokens.js";
@@ -59,6 +59,15 @@ export class TreeBuilder {
   }
 
   finish() {
+    if (this.collect_errors) {
+      const last = this.open_elements[this.open_elements.length - 1];
+      if (last && last.name && !["#document", "html", "body"].includes(last.name)) {
+        if (IMPLIED_END_TAGS.has(last.name)) {
+          return this.document;
+        }
+        this._error("expected-closing-tag-but-got-eof", last.name);
+      }
+    }
     return this.document;
   }
 
@@ -320,6 +329,7 @@ export class TreeBuilder {
         return;
       }
       if (token.name === "td" || token.name === "th") {
+        this._error("unexpected-cell-in-table-body");
         this._insertTableBody();
         const row = this._insertElement("tr", {});
         this.open_elements.push(row);
@@ -393,6 +403,12 @@ export class TreeBuilder {
       this.mode = InsertionMode.IN_ROW;
       return;
     }
+    if (token instanceof Tag && token.kind === Tag.END && token.name === "table") {
+      this._error("unexpected-cell-end-tag", token.name);
+      this._popUntil("table");
+      this.mode = InsertionMode.IN_BODY;
+      return;
+    }
     if (token instanceof Tag && token.kind === Tag.START && (token.name === "td" || token.name === "th")) {
       this._popUntil("td");
       this.mode = InsertionMode.IN_ROW;
@@ -460,9 +476,9 @@ export class TreeBuilder {
     this.mode = InsertionMode.IN_TABLE_BODY;
   }
 
-  _error(code) {
+  _error(code, tagName = null) {
     if (!this.collect_errors) return;
-    const message = generateErrorMessage(code);
+    const message = generateErrorMessage(code, tagName);
     this.errors.push(new ParseError(code, null, null, message));
   }
 }
