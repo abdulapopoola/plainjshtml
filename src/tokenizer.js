@@ -637,13 +637,13 @@ function parseDoctypeIdentifiers(segment, reportError, { requirePublic = true } 
   let i = 0;
   while (i < segment.length && WHITESPACE.has(segment[i])) i += 1;
   if (i >= segment.length) {
-    reportError(requirePublic ? \"missing-doctype-public-identifier\" : \"missing-doctype-system-identifier\");
+    reportError(requirePublic ? "missing-doctype-public-identifier" : "missing-doctype-system-identifier");
     return { publicId: null, systemId: null, forceQuirks: true };
   }
 
   const quote = segment[i];
-  if (quote !== '\"' && quote !== \"'\") {
-    reportError(requirePublic ? \"missing-quote-before-doctype-public-identifier\" : \"missing-quote-before-doctype-system-identifier\");
+  if (quote !== '"' && quote !== "'") {
+    reportError(requirePublic ? "missing-quote-before-doctype-public-identifier" : "missing-quote-before-doctype-system-identifier");
     return { publicId: null, systemId: null, forceQuirks: true };
   }
 
@@ -651,7 +651,7 @@ function parseDoctypeIdentifiers(segment, reportError, { requirePublic = true } 
   const start = i;
   while (i < segment.length && segment[i] !== quote) i += 1;
   if (i >= segment.length) {
-    reportError(requirePublic ? \"eof-in-doctype-public-identifier\" : \"eof-in-doctype-system-identifier\");
+    reportError(requirePublic ? "eof-in-doctype-public-identifier" : "eof-in-doctype-system-identifier");
     return { publicId: segment.slice(start), systemId: null, forceQuirks: true };
   }
   const firstId = segment.slice(start, i);
@@ -659,15 +659,20 @@ function parseDoctypeIdentifiers(segment, reportError, { requirePublic = true } 
 
   let publicId = null;
   let systemId = null;
-  if (requirePublic) {\n    publicId = firstId;\n  } else {\n    systemId = firstId;\n  }\n
+  if (requirePublic) {
+    publicId = firstId;
+  } else {
+    systemId = firstId;
+  }
+
   while (i < segment.length && WHITESPACE.has(segment[i])) i += 1;
   if (i >= segment.length) {
     return { publicId, systemId, forceQuirks: false };
   }
 
   const quote2 = segment[i];
-  if (quote2 !== '\"' && quote2 !== \"'\") {
-    reportError(\"missing-quote-before-doctype-system-identifier\");
+  if (quote2 !== '"' && quote2 !== "'") {
+    reportError("missing-quote-before-doctype-system-identifier");
     return { publicId, systemId, forceQuirks: true };
   }
 
@@ -675,7 +680,7 @@ function parseDoctypeIdentifiers(segment, reportError, { requirePublic = true } 
   const start2 = i;
   while (i < segment.length && segment[i] !== quote2) i += 1;
   if (i >= segment.length) {
-    reportError(\"eof-in-doctype-system-identifier\");
+    reportError("eof-in-doctype-system-identifier");
     return { publicId, systemId: segment.slice(start2), forceQuirks: true };
   }
   systemId = segment.slice(start2, i);
