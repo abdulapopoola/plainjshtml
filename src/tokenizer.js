@@ -95,9 +95,11 @@ export class Tokenizer {
     this.track_node_locations = trackNodeLocations;
     this.errors = [];
     this._newline_positions = [];
+    this._source_html = null;
   }
 
   run(html) {
+    this._source_html = html;
     this._newline_positions = this._computeNewlines(html);
 
     // Minimal tokenizer for now: emit tags/comments/doctypes with entity decoding.
@@ -171,7 +173,7 @@ export class Tokenizer {
     if (!this.collect_errors) return;
     const [line, column] = this._posToLineCol(pos);
     const message = generateErrorMessage(code);
-    this.errors.push(new ParseError(code, line, column, message));
+    this.errors.push(new ParseError(code, line, column, message, this._source_html));
   }
 }
 
