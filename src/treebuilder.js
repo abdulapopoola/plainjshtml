@@ -20,6 +20,13 @@ export class TreeBuilder {
     this.form_element = null;
     this.frameset_ok = true;
     this.quirks_mode = "no-quirks";
+
+    if (fragmentContext) {
+      const html = new ElementNode("html", {}, "html");
+      this.document.appendChild(html);
+      this.open_elements.push(html);
+      this.mode = InsertionMode.IN_BODY;
+    }
   }
 
   process(token) {
