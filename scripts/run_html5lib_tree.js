@@ -176,11 +176,12 @@ function runFile(filePath, { limit = null } = {}) {
     });
     const actual = dumpTree(doc.root);
     const expected = test.docLines.join("\n");
-    if (actual === expected) {
+    const errorCountMatches = doc.errors.length === test.errors.length;
+    if (actual === expected && errorCountMatches) {
       passed += 1;
     } else {
       failed += 1;
-      failures.push({ index: idx, actual, expected });
+      failures.push({ index: idx, actual, expected, actualErrors: doc.errors.length, expectedErrors: test.errors.length });
     }
   }
 
@@ -204,6 +205,9 @@ function main() {
   if (result.failed) {
     const first = result.failures[0];
     console.log(`first failure index: ${first.index}`);
+    if (first.expectedErrors !== first.actualErrors) {
+      console.log(`expected errors: ${first.expectedErrors}, actual: ${first.actualErrors}`);
+    }
     console.log("expected:\n" + first.expected);
     console.log("actual:\n" + first.actual);
     process.exit(1);
