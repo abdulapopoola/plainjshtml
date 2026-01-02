@@ -255,6 +255,9 @@ export class TreeBuilder {
         }
         return;
       }
+      if (token.name === "p") {
+        this._closeIfOpen("p");
+      }
       const node = this._insertElement(token.name, token.attrs);
       if (!token.self_closing && !VOID_ELEMENTS.has(token.name)) {
         this.open_elements.push(node);
@@ -311,6 +314,15 @@ export class TreeBuilder {
   }
 
   _popUntil(name) {
+    for (let i = this.open_elements.length - 1; i > 0; i -= 1) {
+      if (this.open_elements[i].name === name) {
+        this.open_elements.splice(i);
+        return;
+      }
+    }
+  }
+
+  _closeIfOpen(name) {
     for (let i = this.open_elements.length - 1; i > 0; i -= 1) {
       if (this.open_elements[i].name === name) {
         this.open_elements.splice(i);
