@@ -225,6 +225,9 @@ export class TreeBuilder {
       }
     }
     if (token instanceof EOFToken) {
+      const node = this._insertElement("body", {});
+      this.open_elements.push(node);
+      this.mode = InsertionMode.IN_BODY;
       return;
     }
 
