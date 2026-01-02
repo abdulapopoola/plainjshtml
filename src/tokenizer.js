@@ -2,18 +2,7 @@ import { decodeEntitiesInText } from "./entities.js";
 import { generateErrorMessage } from "./errors.js";
 import { CommentToken, CharacterTokens, Doctype, DoctypeToken, EOFToken, ParseError, Tag } from "./tokens.js";
 
-const ATTR_VALUE_UNQUOTED_TERMINATORS = "\t\n\f >&\"'<=`\0";
-const RCDATA_ELEMENTS = new Set(["title", "textarea"]);
-const RAWTEXT_SWITCH_TAGS = new Set([
-  "script",
-  "style",
-  "xmp",
-  "iframe",
-  "noembed",
-  "noframes",
-  "textarea",
-  "title",
-]);
+const WHITESPACE = new Set(["\t", "\n", "\f", " "]);
 
 export class TokenizerOpts {
   constructor({ exactErrors = false, discardBom = true, initialState = null, initialRawtextTag = null, xmlCoercion = false } = {}) {
@@ -52,41 +41,9 @@ export class Tokenizer {
   static DOCTYPE_NAME = 23;
   static AFTER_DOCTYPE_NAME = 24;
   static BOGUS_DOCTYPE = 25;
-  static AFTER_DOCTYPE_PUBLIC_KEYWORD = 26;
-  static AFTER_DOCTYPE_SYSTEM_KEYWORD = 27;
-  static BEFORE_DOCTYPE_PUBLIC_IDENTIFIER = 28;
-  static DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED = 29;
-  static DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED = 30;
-  static AFTER_DOCTYPE_PUBLIC_IDENTIFIER = 31;
-  static BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS = 32;
-  static BEFORE_DOCTYPE_SYSTEM_IDENTIFIER = 33;
-  static DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED = 34;
-  static DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED = 35;
-  static AFTER_DOCTYPE_SYSTEM_IDENTIFIER = 36;
-  static CDATA_SECTION = 37;
-  static CDATA_SECTION_BRACKET = 38;
-  static CDATA_SECTION_END = 39;
   static RCDATA = 40;
-  static RCDATA_LESS_THAN_SIGN = 41;
-  static RCDATA_END_TAG_OPEN = 42;
-  static RCDATA_END_TAG_NAME = 43;
   static RAWTEXT = 44;
-  static RAWTEXT_LESS_THAN_SIGN = 45;
-  static RAWTEXT_END_TAG_OPEN = 46;
-  static RAWTEXT_END_TAG_NAME = 47;
   static PLAINTEXT = 48;
-  static SCRIPT_DATA_ESCAPED = 49;
-  static SCRIPT_DATA_ESCAPED_DASH = 50;
-  static SCRIPT_DATA_ESCAPED_DASH_DASH = 51;
-  static SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN = 52;
-  static SCRIPT_DATA_ESCAPED_END_TAG_OPEN = 53;
-  static SCRIPT_DATA_ESCAPED_END_TAG_NAME = 54;
-  static SCRIPT_DATA_DOUBLE_ESCAPE_START = 55;
-  static SCRIPT_DATA_DOUBLE_ESCAPED = 56;
-  static SCRIPT_DATA_DOUBLE_ESCAPED_DASH = 57;
-  static SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH = 58;
-  static SCRIPT_DATA_DOUBLE_ESCAPED_LESS_THAN_SIGN = 59;
-  static SCRIPT_DATA_DOUBLE_ESCAPE_END = 60;
 
   constructor(sink, opts = new TokenizerOpts(), { collectErrors = false, trackNodeLocations = false } = {}) {
     this.sink = sink;
@@ -102,40 +59,491 @@ export class Tokenizer {
     this._source_html = html;
     this._newline_positions = this._computeNewlines(html);
 
-    // Minimal tokenizer for now: emit tags/comments/doctypes with entity decoding.
-    const tagRe = /<[^>]*>/g;
-    let lastIndex = 0;
+    let state = this.opts.initial_state ?? Tokenizer.DATA;
+    let pos = 0;
+    let buffer = "";
 
-    for (let match = tagRe.exec(html); match; match = tagRe.exec(html)) {
-      const tag = match[0];
-      if (match.index > lastIndex) {
-        const text = html.slice(lastIndex, match.index);
-        const decoded = decodeEntitiesInText(text, { reportError: (code) => this._error(code, match.index) });
-        this.sink.process(new CharacterTokens(decoded));
-      }
+    let currentTag = null;
+    let currentAttrName = "";
+    let currentAttrValue = "";
+    let currentComment = "";
+    let currentDoctype = null;
 
-      if (tag.startsWith("<!--")) {
-        const data = tag.slice(4, -3);
-        this.sink.process(new CommentToken(data));
-      } else if (tag.startsWith("<!DOCTYPE") || tag.startsWith("<!doctype")) {
-        const name = tag.replace(/<!doctype/i, "").replace(/>/g, "").trim() || "html";
-        this.sink.process(new DoctypeToken(new Doctype(name)));
-      } else if (tag.startsWith("</")) {
-        const name = tag.slice(2, -1).trim().toLowerCase();
-        this.sink.process(new Tag(Tag.END, name, null, false));
-      } else if (tag.startsWith("<!")) {
-        // Ignore other markup declarations.
+    const flushText = () => {
+      if (!buffer) return;
+      const decoded = decodeEntitiesInText(buffer, { reportError: (code) => this._error(code, pos) });
+      this.sink.process(new CharacterTokens(decoded));
+      buffer = "";
+    };
+
+    const emitTag = () => {
+      if (!currentTag) return;
+      this.sink.process(currentTag);
+      currentTag = null;
+    };
+
+    const commitAttr = () => {
+      if (!currentTag || !currentAttrName) return;
+      const name = currentAttrName;
+      if (currentTag.attrs[name] == null) {
+        currentTag.attrs[name] = decodeEntitiesInText(currentAttrValue, { inAttribute: true, reportError: (code) => this._error(code, pos) });
       } else {
-        const { name, attrs, selfClosing } = parseStartTag(tag, (code) => this._error(code, match.index));
-        this.sink.process(new Tag(Tag.START, name, attrs, selfClosing));
+        this._error("duplicate-attribute", pos);
       }
+      currentAttrName = "";
+      currentAttrValue = "";
+    };
 
-      lastIndex = tagRe.lastIndex;
+    while (pos < html.length) {
+      const ch = html[pos];
+
+      switch (state) {
+        case Tokenizer.DATA:
+          if (ch === "<") {
+            flushText();
+            state = Tokenizer.TAG_OPEN;
+            pos += 1;
+            continue;
+          }
+          if (state === Tokenizer.PLAINTEXT) {
+            buffer += ch;
+            pos += 1;
+            continue;
+          }
+          buffer += ch;
+          pos += 1;
+          continue;
+
+        case Tokenizer.TAG_OPEN:
+          if (ch === "/") {
+            state = Tokenizer.END_TAG_OPEN;
+            pos += 1;
+            continue;
+          }
+          if (ch === "!") {
+            state = Tokenizer.MARKUP_DECLARATION_OPEN;
+            pos += 1;
+            continue;
+          }
+          if (/[A-Za-z]/.test(ch)) {
+            currentTag = new Tag(Tag.START, ch.toLowerCase(), {});
+            state = Tokenizer.TAG_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === "?") {
+            this._error("unexpected-question-mark-instead-of-tag-name", pos);
+            state = Tokenizer.BOGUS_COMMENT;
+            currentComment = "?";
+            pos += 1;
+            continue;
+          }
+          buffer += "<";
+          state = Tokenizer.DATA;
+          continue;
+
+        case Tokenizer.END_TAG_OPEN:
+          if (/[A-Za-z]/.test(ch)) {
+            currentTag = new Tag(Tag.END, ch.toLowerCase(), {});
+            state = Tokenizer.TAG_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            this._error("missing-end-tag-name", pos);
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          this._error("invalid-first-character-of-tag-name", pos);
+          state = Tokenizer.BOGUS_COMMENT;
+          currentComment = "";
+          continue;
+
+        case Tokenizer.TAG_NAME:
+          if (WHITESPACE.has(ch)) {
+            state = Tokenizer.BEFORE_ATTRIBUTE_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === "/") {
+            state = Tokenizer.SELF_CLOSING_START_TAG;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentTag.name += ch.toLowerCase();
+          pos += 1;
+          continue;
+
+        case Tokenizer.BEFORE_ATTRIBUTE_NAME:
+          if (WHITESPACE.has(ch)) {
+            pos += 1;
+            continue;
+          }
+          if (ch === "/") {
+            state = Tokenizer.SELF_CLOSING_START_TAG;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentAttrName = ch.toLowerCase();
+          currentAttrValue = "";
+          state = Tokenizer.ATTRIBUTE_NAME;
+          pos += 1;
+          continue;
+
+        case Tokenizer.ATTRIBUTE_NAME:
+          if (WHITESPACE.has(ch)) {
+            state = Tokenizer.AFTER_ATTRIBUTE_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === "=") {
+            state = Tokenizer.BEFORE_ATTRIBUTE_VALUE;
+            pos += 1;
+            continue;
+          }
+          if (ch === "/") {
+            commitAttr();
+            state = Tokenizer.SELF_CLOSING_START_TAG;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            commitAttr();
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentAttrName += ch.toLowerCase();
+          pos += 1;
+          continue;
+
+        case Tokenizer.AFTER_ATTRIBUTE_NAME:
+          if (WHITESPACE.has(ch)) {
+            pos += 1;
+            continue;
+          }
+          if (ch === "=") {
+            state = Tokenizer.BEFORE_ATTRIBUTE_VALUE;
+            pos += 1;
+            continue;
+          }
+          if (ch === "/") {
+            commitAttr();
+            state = Tokenizer.SELF_CLOSING_START_TAG;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            commitAttr();
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          commitAttr();
+          currentAttrName = ch.toLowerCase();
+          currentAttrValue = "";
+          state = Tokenizer.ATTRIBUTE_NAME;
+          pos += 1;
+          continue;
+
+        case Tokenizer.BEFORE_ATTRIBUTE_VALUE:
+          if (WHITESPACE.has(ch)) {
+            pos += 1;
+            continue;
+          }
+          if (ch === '"') {
+            state = Tokenizer.ATTRIBUTE_VALUE_DOUBLE;
+            pos += 1;
+            continue;
+          }
+          if (ch === "'") {
+            state = Tokenizer.ATTRIBUTE_VALUE_SINGLE;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            this._error("missing-attribute-value", pos);
+            commitAttr();
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          state = Tokenizer.ATTRIBUTE_VALUE_UNQUOTED;
+          continue;
+
+        case Tokenizer.ATTRIBUTE_VALUE_DOUBLE:
+          if (ch === '"') {
+            commitAttr();
+            state = Tokenizer.AFTER_ATTRIBUTE_VALUE_QUOTED;
+            pos += 1;
+            continue;
+          }
+          currentAttrValue += ch;
+          pos += 1;
+          continue;
+
+        case Tokenizer.ATTRIBUTE_VALUE_SINGLE:
+          if (ch === "'") {
+            commitAttr();
+            state = Tokenizer.AFTER_ATTRIBUTE_VALUE_QUOTED;
+            pos += 1;
+            continue;
+          }
+          currentAttrValue += ch;
+          pos += 1;
+          continue;
+
+        case Tokenizer.ATTRIBUTE_VALUE_UNQUOTED:
+          if (WHITESPACE.has(ch)) {
+            commitAttr();
+            state = Tokenizer.BEFORE_ATTRIBUTE_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            commitAttr();
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentAttrValue += ch;
+          pos += 1;
+          continue;
+
+        case Tokenizer.AFTER_ATTRIBUTE_VALUE_QUOTED:
+          if (WHITESPACE.has(ch)) {
+            state = Tokenizer.BEFORE_ATTRIBUTE_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === "/") {
+            state = Tokenizer.SELF_CLOSING_START_TAG;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          state = Tokenizer.BEFORE_ATTRIBUTE_NAME;
+          continue;
+
+        case Tokenizer.SELF_CLOSING_START_TAG:
+          if (ch === ">") {
+            if (currentTag) {
+              currentTag.self_closing = true;
+            }
+            emitTag();
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          state = Tokenizer.BEFORE_ATTRIBUTE_NAME;
+          continue;
+
+        case Tokenizer.MARKUP_DECLARATION_OPEN:
+          if (html.slice(pos, pos + 2) === "--") {
+            state = Tokenizer.COMMENT_START;
+            currentComment = "";
+            pos += 2;
+            continue;
+          }
+          if (/doctype/i.test(html.slice(pos, pos + 7))) {
+            state = Tokenizer.DOCTYPE;
+            pos += 7;
+            currentDoctype = new Doctype();
+            continue;
+          }
+          state = Tokenizer.BOGUS_COMMENT;
+          currentComment = "";
+          continue;
+
+        case Tokenizer.COMMENT_START:
+          if (ch === "-") {
+            state = Tokenizer.COMMENT_START_DASH;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            this._error("abrupt-closing-of-empty-comment", pos);
+            this.sink.process(new CommentToken(""));
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          state = Tokenizer.COMMENT;
+          continue;
+
+        case Tokenizer.COMMENT_START_DASH:
+          if (ch === "-") {
+            state = Tokenizer.COMMENT_END;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            this._error("abrupt-closing-of-empty-comment", pos);
+            this.sink.process(new CommentToken(""));
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentComment += "-";
+          state = Tokenizer.COMMENT;
+          continue;
+
+        case Tokenizer.COMMENT:
+          if (ch === "-") {
+            state = Tokenizer.COMMENT_END_DASH;
+            pos += 1;
+            continue;
+          }
+          currentComment += ch;
+          pos += 1;
+          continue;
+
+        case Tokenizer.COMMENT_END_DASH:
+          if (ch === "-") {
+            state = Tokenizer.COMMENT_END;
+            pos += 1;
+            continue;
+          }
+          currentComment += "-" + ch;
+          state = Tokenizer.COMMENT;
+          pos += 1;
+          continue;
+
+        case Tokenizer.COMMENT_END:
+          if (ch === ">") {
+            this.sink.process(new CommentToken(currentComment));
+            currentComment = "";
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          if (ch === "!") {
+            state = Tokenizer.COMMENT_END_BANG;
+            pos += 1;
+            continue;
+          }
+          currentComment += "--" + ch;
+          state = Tokenizer.COMMENT;
+          pos += 1;
+          continue;
+
+        case Tokenizer.COMMENT_END_BANG:
+          if (ch === ">") {
+            this._error("incorrectly-closed-comment", pos);
+            this.sink.process(new CommentToken(currentComment));
+            currentComment = "";
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentComment += "--!" + ch;
+          state = Tokenizer.COMMENT;
+          pos += 1;
+          continue;
+
+        case Tokenizer.BOGUS_COMMENT:
+          if (ch === ">") {
+            this.sink.process(new CommentToken(currentComment));
+            currentComment = "";
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentComment += ch;
+          pos += 1;
+          continue;
+
+        case Tokenizer.DOCTYPE:
+          if (WHITESPACE.has(ch)) {
+            state = Tokenizer.BEFORE_DOCTYPE_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            this._error("missing-doctype-name", pos);
+            this.sink.process(new DoctypeToken(new Doctype(null, null, null, true)));
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          state = Tokenizer.BEFORE_DOCTYPE_NAME;
+          continue;
+
+        case Tokenizer.BEFORE_DOCTYPE_NAME:
+          if (WHITESPACE.has(ch)) {
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            this._error("missing-doctype-name", pos);
+            this.sink.process(new DoctypeToken(new Doctype(null, null, null, true)));
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentDoctype.name = ch.toLowerCase();
+          state = Tokenizer.DOCTYPE_NAME;
+          pos += 1;
+          continue;
+
+        case Tokenizer.DOCTYPE_NAME:
+          if (WHITESPACE.has(ch)) {
+            state = Tokenizer.AFTER_DOCTYPE_NAME;
+            pos += 1;
+            continue;
+          }
+          if (ch === ">") {
+            this.sink.process(new DoctypeToken(currentDoctype));
+            currentDoctype = null;
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          currentDoctype.name += ch.toLowerCase();
+          pos += 1;
+          continue;
+
+        case Tokenizer.AFTER_DOCTYPE_NAME:
+          if (ch === ">") {
+            this.sink.process(new DoctypeToken(currentDoctype));
+            currentDoctype = null;
+            state = Tokenizer.DATA;
+            pos += 1;
+            continue;
+          }
+          pos += 1;
+          continue;
+
+        default:
+          buffer += ch;
+          pos += 1;
+      }
     }
 
-    if (lastIndex < html.length) {
-      const tail = html.slice(lastIndex);
-      const decoded = decodeEntitiesInText(tail, { reportError: (code) => this._error(code, lastIndex) });
+    if (buffer) {
+      const decoded = decodeEntitiesInText(buffer, { reportError: (code) => this._error(code, pos) });
       this.sink.process(new CharacterTokens(decoded));
     }
 
@@ -175,27 +583,4 @@ export class Tokenizer {
     const message = generateErrorMessage(code);
     this.errors.push(new ParseError(code, line, column, message, this._source_html));
   }
-}
-
-function parseStartTag(tag, reportError) {
-  const inner = tag.slice(1, -1).trim();
-  const selfClosing = inner.endsWith("/");
-  const content = selfClosing ? inner.slice(0, -1).trim() : inner;
-  const parts = content.split(/\s+/, 2);
-  const name = parts[0].toLowerCase();
-  const attrs = {};
-  const attrText = content.slice(name.length).trim();
-
-  if (attrText) {
-    const attrRe = /([^\s=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
-    let match;
-    while ((match = attrRe.exec(attrText))) {
-      const key = match[1];
-      const valueRaw = match[2] ?? match[3] ?? match[4] ?? "";
-      const value = decodeEntitiesInText(valueRaw, { inAttribute: true, reportError });
-      attrs[key] = value;
-    }
-  }
-
-  return { name, attrs, selfClosing };
 }
