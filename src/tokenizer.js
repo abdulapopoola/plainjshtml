@@ -520,8 +520,11 @@ export class Tokenizer {
 
         case Tokenizer.DOCTYPE_NAME:
           if (WHITESPACE.has(ch)) {
-            state = Tokenizer.AFTER_DOCTYPE_NAME;
-            pos += 1;
+            const { nextPos } = parseDoctypeRemainder(html, pos, currentDoctype, (code) => this._error(code, pos));
+            pos = nextPos;
+            this.sink.process(new DoctypeToken(currentDoctype));
+            currentDoctype = null;
+            state = Tokenizer.DATA;
             continue;
           }
           if (ch === ">") {
@@ -593,4 +596,88 @@ export class Tokenizer {
     const message = generateErrorMessage(code);
     this.errors.push(new ParseError(code, line, column, message, this._source_html));
   }
+}
+
+function parseDoctypeRemainder(html, pos, doctype, reportError) {
+  const end = html.indexOf(">", pos);
+  if (end === -1) {
+    reportError("eof-in-doctype");
+    doctype.force_quirks = true;
+    return { nextPos: html.length };
+  }
+
+  const rest = html.slice(pos, end).trim();
+  if (!rest) {
+    return { nextPos: end + 1 };
+  }
+
+  const lower = rest.toLowerCase();
+  if (lower.startsWith("public")) {
+    const parsed = parseDoctypeIdentifiers(rest.slice(6), reportError);
+    doctype.public_id = parsed.publicId;
+    doctype.system_id = parsed.systemId;
+    if (parsed.forceQuirks) {
+      doctype.force_quirks = true;
+    }
+  } else if (lower.startsWith("system")) {
+    const parsed = parseDoctypeIdentifiers(rest.slice(6), reportError, { requirePublic: false });
+    doctype.system_id = parsed.systemId;
+    if (parsed.forceQuirks) {
+      doctype.force_quirks = true;
+    }
+  } else {
+    reportError("unexpected-character-after-doctype-name");
+    doctype.force_quirks = true;
+  }
+
+  return { nextPos: end + 1 };
+}
+
+function parseDoctypeIdentifiers(segment, reportError, { requirePublic = true } = {}) {
+  let i = 0;
+  while (i < segment.length && WHITESPACE.has(segment[i])) i += 1;
+  if (i >= segment.length) {
+    reportError(requirePublic ? \"missing-doctype-public-identifier\" : \"missing-doctype-system-identifier\");
+    return { publicId: null, systemId: null, forceQuirks: true };
+  }
+
+  const quote = segment[i];
+  if (quote !== '\"' && quote !== \"'\") {
+    reportError(requirePublic ? \"missing-quote-before-doctype-public-identifier\" : \"missing-quote-before-doctype-system-identifier\");
+    return { publicId: null, systemId: null, forceQuirks: true };
+  }
+
+  i += 1;
+  const start = i;
+  while (i < segment.length && segment[i] !== quote) i += 1;
+  if (i >= segment.length) {
+    reportError(requirePublic ? \"eof-in-doctype-public-identifier\" : \"eof-in-doctype-system-identifier\");
+    return { publicId: segment.slice(start), systemId: null, forceQuirks: true };
+  }
+  const firstId = segment.slice(start, i);
+  i += 1;
+
+  let publicId = null;
+  let systemId = null;
+  if (requirePublic) {\n    publicId = firstId;\n  } else {\n    systemId = firstId;\n  }\n
+  while (i < segment.length && WHITESPACE.has(segment[i])) i += 1;
+  if (i >= segment.length) {
+    return { publicId, systemId, forceQuirks: false };
+  }
+
+  const quote2 = segment[i];
+  if (quote2 !== '\"' && quote2 !== \"'\") {
+    reportError(\"missing-quote-before-doctype-system-identifier\");
+    return { publicId, systemId, forceQuirks: true };
+  }
+
+  i += 1;
+  const start2 = i;
+  while (i < segment.length && segment[i] !== quote2) i += 1;
+  if (i >= segment.length) {
+    reportError(\"eof-in-doctype-system-identifier\");
+    return { publicId, systemId: segment.slice(start2), forceQuirks: true };
+  }
+  systemId = segment.slice(start2, i);
+  return { publicId, systemId, forceQuirks: false };
 }
