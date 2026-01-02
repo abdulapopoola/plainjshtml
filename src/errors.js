@@ -63,6 +63,7 @@ export function generateErrorMessage(code, tagName = null) {
     "unexpected-end-tag-after-head": `Unexpected </${tagName}> end tag after <head>`,
     "unexpected-start-tag-ignored": `<${tagName}> start tag ignored in current context`,
     "unexpected-start-tag-implies-end-tag": `<${tagName}> start tag implicitly closes previous element`,
+    "unexpected-start-tag-out-of-my-head": "Unexpected start tag after </head>",
     "expected-closing-tag-but-got-eof": `Expected </${tagName}> closing tag but reached end of file`,
     "expected-named-closing-tag-but-got-eof": `Expected </${tagName}> closing tag but reached end of file`,
     "invalid-codepoint": "Invalid character (U+0000 NULL or U+000C FORM FEED)",

@@ -248,6 +248,14 @@ export class TreeBuilder {
         this.mode = InsertionMode.IN_BODY;
         return;
       }
+      if (["base", "basefont", "bgsound", "link", "meta", "title", "style", "script"].includes(token.name)) {
+        this._error("unexpected-start-tag-out-of-my-head");
+        if (this.head_element) {
+          const node = new ElementNode(token.name, token.attrs, "html");
+          this.head_element.appendChild(node);
+        }
+        return;
+      }
       if (token.name === "frameset") {
         const node = this._insertElement("frameset", token.attrs);
         this.open_elements.push(node);
